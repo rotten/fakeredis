@@ -102,7 +102,7 @@ def create_redis(request):
                        port=int(os.environ.get('TEST_REDIS_PORT', 6379)),
                        db=db,
                        decode_responses=decode_responses
-                   )
+                      )
             min_server_marker = request.node.get_closest_marker('min_server')
             if min_server_marker is not None:
                 server_version = conn.info()['redis_version']
@@ -2857,6 +2857,7 @@ def test_zremrangebylex_wrong_type(r):
     with pytest.raises(redis.ResponseError):
         r.zremrangebylex('foo', b'bar', b'baz')
 
+
 def test_zunion(r):
     zadd(r, 'foo', {"one": 1})
     zadd(r, 'foo', {"two": 2})
@@ -2865,6 +2866,7 @@ def test_zunion(r):
     zadd(r, 'bar', {"three": 3})
     zunion_result = r.zunion(['foo', 'bar'], withscores=False)
     assert zunion_result == [b'one', b'three', b'two']
+
 
 def test_zunion_withscores(r):
     zadd(r, 'foo', {"one": 1})
@@ -2875,14 +2877,16 @@ def test_zunion_withscores(r):
     zunion_result = r.zunion('foo', 'bar', withscores=True)
     assert zunion_result == [(b'one', 2), (b'three', 3), (b'two', 4)]
 
+
 def test_zunion_key_weights_dict(r):
     zadd(r, 'foo', {"one": 1})
     zadd(r, 'foo', {"two": 2})
     zadd(r, 'bar', {"one": 1})
     zadd(r, 'bar', {"two": 2})
     zadd(r, 'bar', {"three": 3})
-    zunion_result = r.zunion({keys: ['foo', 'bar'], weights: [2.0, 1.0]})
+    zunion_result = r.zunion({'keys': ['foo', 'bar'], 'weights': [2.0, 1.0]})
     assert zunion_result == [(b'one', 2), (b'three', 3), (b'two', 5)]
+
 
 def test_zunion_key_weights_dict_keyword_max(r):
     zadd(r, 'foo', {"one": 1})
@@ -2890,8 +2894,9 @@ def test_zunion_key_weights_dict_keyword_max(r):
     zadd(r, 'bar', {"one": 1})
     zadd(r, 'bar', {"two": 2})
     zadd(r, 'bar', {"three": 3})
-    zunion_result = r.zunion({keys: ['foo', 'bar'], weights: [2.0, 1.0]}, aggregate='max', withscores=True)
+    zunion_result = r.zunion({'keys': ['foo', 'bar'], 'weights': [2.0, 1.0]}, aggregate='max', withscores=True)
     assert zunion_result == [(b'one', 2), (b'three', 3), (b'two', 5)]
+
 
 def test_zunion_key_weights_ordered(r):
     zadd(r, 'foo', {"one": 1})
@@ -2901,6 +2906,7 @@ def test_zunion_key_weights_ordered(r):
     zadd(r, 'bar', {"three": 3})
     zunion_result = r.zunion('foo', 'bar', 'weights', 2.0, 1.0, withscores=False)
     assert zunion_result == [b'one', b'three', b'two']
+
 
 def test_zunion_key_weights_max_ordered(r):
     zadd(r, 'foo', {"one": 1})

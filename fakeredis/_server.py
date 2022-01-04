@@ -116,7 +116,7 @@ PONG = SimpleString(b'PONG')
 BGSAVE_STARTED = SimpleString(b'Background saving started')
 
 
-def null_terminate(s:str):
+def null_terminate(s: str):
     # Redis uses C functions on some strings, which means they stop at the
     # first NULL.
     if b'\0' in s:
@@ -235,12 +235,12 @@ class CommandItem:
 
     def __str__(self):
         cidict = {
-                'key': self.key,
-                'value': self._value,
-                'expireat': self._expireat,
-                'modified': self._modified,
-                'expireat_modified': self._expireat_modified
-                }
+                  'key': self.key,
+                  'value': self._value,
+                  'expireat': self._expireat,
+                  'modified': self._modified,
+                  'expireat_modified': self._expireat_modified
+                 }
         return str(cidict)
 
     @property
@@ -2360,7 +2360,7 @@ class FakeSocket:
 
             if casenorm(arg) == 'weights':
                 # We expect the next few args to all be weights, until we hit another keyword
-                for arg in args[arg_index:]:
+                for arg in args[args_index:]:
                     args_index += 1
                     if casenorm(arg) not in ['aggregate', 'withscores']:
                         weights.append(Float.decode(arg))
@@ -2368,17 +2368,17 @@ class FakeSocket:
                         break
 
             # If we haven't run out of args yet, then this next value is our aggregate
-            if casenorm(arg) == 'aggregate' and len(args) >= arg_index - 1:
-                aggregate = casenorm(args[arg_index])
-                arg_index += 1
-                if len(args) >= arg_index - 1:
-                    arg = args[arg_index]
+            if casenorm(arg) == 'aggregate' and len(args) >= args_index - 1:
+                aggregate = casenorm(args[args_index])
+                args_index += 1
+                if len(args) >= args_index - 1:
+                    arg = args[args_index]
 
             # If we still haven't run out of args try to set the withscore
-            if casenorm(arg) == 'withscores' and len(args) >= arg_index - 1:
+            if casenorm(arg) == 'withscores' and len(args) >= args_index - 1:
                 # In this scenario we may have a string that needs to be converted to a bool
-                withscores = bool(strtobool(casenorm(str(args[arg_index]))))
-           
+                withscores = bool(strtobool(casenorm(str(args[args_index]))))
+
         # default the weights to a value of 1.0
         if len(weights) < len(keys):
             weights += [1.0] * (len(keys) - len(weights))
@@ -2441,6 +2441,10 @@ class FakeSocket:
         out_zset = ZSet()
         for member, score in out.items():
             out_zset[member] = score
+
+        if withscores:
+            # todo - change shape of output if necessary
+            pass
 
         if dest is not None:
             dest.value = out_zset
