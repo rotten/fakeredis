@@ -98,11 +98,11 @@ def create_redis(request):
         else:
             cls = getattr(redis, name)
             conn = cls(
-                       os.environ.get('TEST_REDIS_HOST', 'localhost'),
-                       port=int(os.environ.get('TEST_REDIS_PORT', 6379)),
-                       db=db,
-                       decode_responses=decode_responses
-                      )
+                os.environ.get('TEST_REDIS_HOST', 'localhost'),
+                port=int(os.environ.get('TEST_REDIS_PORT', 6379)),
+                db=db,
+                decode_responses=decode_responses
+            )
             min_server_marker = request.node.get_closest_marker('min_server')
             if min_server_marker is not None:
                 server_version = conn.info()['redis_version']

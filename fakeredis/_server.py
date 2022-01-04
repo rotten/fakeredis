@@ -235,12 +235,12 @@ class CommandItem:
 
     def __str__(self):
         cidict = {
-                  'key': self.key,
-                  'value': self._value,
-                  'expireat': self._expireat,
-                  'modified': self._modified,
-                  'expireat_modified': self._expireat_modified
-                 }
+            'key': self.key,
+            'value': self._value,
+            'expireat': self._expireat,
+            'modified': self._modified,
+            'expireat_modified': self._expireat_modified
+        }
         return str(cidict)
 
     @property
@@ -767,7 +767,7 @@ class FakeSocket:
                 while len(buf) < length + 2:
                     buf += yield
                 fields.append(buf[:length])
-                buf = buf[length+2:]       # +2 to skip the CRLF
+                buf = buf[(length + 2):]       # +2 to skip the CRLF
             self._process_command(fields)
 
     def _run_command(self, func, sig, args, from_script):
@@ -1164,10 +1164,10 @@ class FakeSocket:
         if p == -1:
             return None
         prefix = pattern[:p]
-        suffix = pattern[p+1:]
+        suffix = pattern[(p + 1):]
         arrow = suffix.find(b'->', 0, -1)
         if arrow != -1:
-            field = suffix[arrow+2:]
+            field = suffix[(arrow + 2):]
             suffix = suffix[:arrow]
         else:
             field = None
@@ -1603,7 +1603,7 @@ class FakeSocket:
             out = key.get(b'')
             if len(out) < offset:
                 out += b'\x00' * (offset - len(out))
-            out = out[0:offset] + value + out[offset+len(value):]
+            out = out[0:offset] + value + out[(offset + len(value)):]
             key.update(out)
             return len(out)
 
@@ -2845,8 +2845,10 @@ class FakeConnection(redis.Connection):
                 raise redis.ConnectionError(CONNECTION_ERROR_MSG)
         else:
             response = self._sock.responses.get()
+
         if isinstance(response, redis.ResponseError):
             raise response
+
         if disable_decoding:
             return response
         else:
