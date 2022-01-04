@@ -14,6 +14,7 @@ import warnings
 import weakref
 from collections import defaultdict
 from collections.abc import MutableMapping
+from distutils.util import strtobool
 
 import redis
 import six
@@ -115,7 +116,7 @@ PONG = SimpleString(b'PONG')
 BGSAVE_STARTED = SimpleString(b'Background saving started')
 
 
-def null_terminate(s):
+def null_terminate(s:str):
     # Redis uses C functions on some strings, which means they stop at the
     # first NULL.
     if b'\0' in s:
@@ -124,7 +125,14 @@ def null_terminate(s):
 
 
 def casenorm(s):
-    return null_terminate(s).lower()
+    if isinstance(s, str):
+        # consider using casefold() here instead of lower?
+        return null_terminate(s).lower()
+    elif isinstance(s, list):
+        return [casenorm(elem) for elem in s]
+    else:
+        # nothing to do:
+        return s
 
 
 def casematch(a, b):
@@ -224,6 +232,16 @@ class CommandItem:
         self.db = db
         self._modified = False
         self._expireat_modified = False
+
+    def __str__(self):
+        cidict = {
+                'key': self.key,
+                'value': self._value,
+                'expireat': self._expireat,
+                'modified': self._modified,
+                'expireat_modified': self._expireat_modified
+                }
+        return str(cidict)
 
     @property
     def value(self):
@@ -2309,35 +2327,80 @@ class FakeSocket:
         else:
             raise SimpleError(WRONGTYPE_MSG)
 
-    def _zunioninter(self, func, dest, numkeys, *args):
-        if numkeys < 1:
-            raise SimpleError(ZUNIONSTORE_KEYS_MSG)
-        if numkeys > len(args):
-            raise SimpleError(SYNTAX_ERROR_MSG)
-        aggregate = b'sum'
-        sets = []
-        for i in range(numkeys):
-            item = CommandItem(args[i], self._db, item=self._db.get(args[i]), default=ZSet())
-            sets.append(self._get_zset(item.value))
-        weights = [1.0] * numkeys
+    # it is possible a user could send a list of order dependent args into the function
+    # (the way the redis command line works)
+    # redis-py however, supports aggregate and withscores as keywords.
+    #          it also supports sending the keys paired with the weights in a dict
+    def _zunioninter(self, func, dest, *args, **kwargs):
+        ## Get the keyword args if there are any:
+        # lets make sure the keyword arguments are "case insensitive"
+        keyword_args = dict((casenorm(k), v) for k, v in kwargs.items())
 
-        i = numkeys
-        while i < len(args):
-            arg = args[i]
-            if casematch(arg, b'weights') and i + numkeys < len(args):
-                weights = [Float.decode(x) for x in args[i + 1:i + numkeys + 1]]
-                i += numkeys + 1
-            elif casematch(arg, b'aggregate') and i + 1 < len(args):
-                aggregate = casenorm(args[i + 1])
-                if aggregate not in (b'sum', b'min', b'max'):
-                    raise SimpleError(SYNTAX_ERROR_MSG)
-                i += 2
-            else:
-                raise SimpleError(SYNTAX_ERROR_MSG)
+        # redis defaults to the 'sum' aggregate
+        aggregate = keyword_args.get('aggregate', b'sum')
+        # withscores (zunion only) defaults to False in redis
+        withscores = keyword_args.get('withscores', False)
 
-        out_members = set(sets[0])
-        for s in sets[1:]:
-            if func == 'ZUNIONSTORE':
+        keys, weights = [], []
+        if isinstance(args, dict):
+            if 'keys' in args:
+                keys = args['keys']
+            if 'weights' in args:
+                weights = args['weights']
+        else:
+            # the args are the keys until we hit a keyword which means you
+            # can never use a key named "weight" or "aggregate" ...
+            args_index = 0
+            for arg in args:
+                args_index += 1
+                if casenorm(arg) not in ['weights', 'aggregate', 'withscores']:
+                    keys.append(arg)
+                else:
+                    break
+
+            if casenorm(arg) == 'weights':
+                # We expect the next few args to all be weights, until we hit another keyword
+                for arg in args[arg_index:]:
+                    args_index += 1
+                    if casenorm(arg) not in ['aggregate', 'withscores']:
+                        weights.append(Float.decode(arg))
+                    else:
+                        break
+
+            # If we haven't run out of args yet, then this next value is our aggregate
+            if casenorm(arg) == 'aggregate' and len(args) >= arg_index - 1:
+                aggregate = casenorm(args[arg_index])
+                arg_index += 1
+                if len(args) >= arg_index - 1:
+                    arg = args[arg_index]
+
+            # If we still haven't run out of args try to set the withscore
+            if casenorm(arg) == 'withscores' and len(args) >= arg_index - 1:
+                # In this scenario we may have a string that needs to be converted to a bool
+                withscores = bool(strtobool(casenorm(str(args[arg_index]))))
+           
+        # default the weights to a value of 1.0
+        if len(weights) < len(keys):
+            weights += [1.0] * (len(keys) - len(weights))
+
+        # double check that we got a valid aggregate value
+        if aggregate not in (b'sum', b'min', b'max'):
+            raise SimpleError(SYNTAX_ERROR_MSG + f' -- aggregate is set to {aggregate}')
+
+        # intialize the intersection set by putting all of the requested Zsets in a list
+        zset_list = []
+        for key in keys:
+            item = CommandItem(key, self._db, item=self._db.get(key), default=ZSet())
+            print(f'{str(key) = }, {str(item) = }')
+
+            zset_list.append(self._get_zset(item.value))
+
+        for zs in zset_list:
+            print(f'{str(zs) = }')
+
+        out_members = set(zset_list[0])
+        for s in zset_list[1:]:
+            if func in ['ZUNION', 'ZUNIONSTORE']:
                 out_members |= set(s)
             else:
                 out_members.intersection_update(s)
@@ -2349,13 +2412,14 @@ class FakeSocket:
         # The sort affects the order of floating-point operations.
         # Note that redis uses qsort(1), which has no stability guarantees,
         # so we can't be sure to match it in all cases.
-        for s, w in sorted(zip(sets, weights), key=lambda x: len(x[0])):
+        for s, w in sorted(zip(zset_list, weights), key=lambda x: len(x[0])):
             for member, score in s.items():
-                score *= w
                 # Redis only does this step for ZUNIONSTORE. See
                 # https://github.com/antirez/redis/issues/3954.
-                if func == 'ZUNIONSTORE' and math.isnan(score):
+                if func in ['ZUNION', 'ZUNIONSTORE'] and math.isnan(score):
                     score = 0.0
+                else:
+                    score *= w
                 if member not in out_members:
                     continue
                 if member in out:
@@ -2378,16 +2442,28 @@ class FakeSocket:
         for member, score in out.items():
             out_zset[member] = score
 
-        dest.value = out_zset
-        return len(out_zset)
+        if dest is not None:
+            dest.value = out_zset
+
+        if func == 'ZUNION':
+            return list(out_zset)
+        else:
+            return len(out_zset)
+
+    # @command((Key(ZSet), Float), (bytes, bytes))
+    # @command((Key(ZSet), bytes))
+    # @command((Key(ZSet),), (Key(ZSet),))
+    @command((Key(list),))
+    def zunion(self, *args, **kwargs):
+        return self._zunioninter('ZUNION', None, *args, **kwargs)
 
     @command((Key(), Int, bytes), (bytes,))
-    def zunionstore(self, dest, numkeys, *args):
-        return self._zunioninter('ZUNIONSTORE', dest, numkeys, *args)
+    def zunionstore(self, dest, numkeys, *args, **kwargs):
+        return self._zunioninter('ZUNIONSTORE', dest, *args, **kwargs)
 
     @command((Key(), Int, bytes), (bytes,))
-    def zinterstore(self, dest, numkeys, *args):
-        return self._zunioninter('ZINTERSTORE', dest, numkeys, *args)
+    def zinterstore(self, dest, numkeys, *args, **kwargs):
+        return self._zunioninter('ZINTERSTORE', dest, *args, **kwargs)
 
     # Server commands
     # TODO: lots

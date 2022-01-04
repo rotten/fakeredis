@@ -68,7 +68,9 @@ def zincrby(r, key, amount, value):
 @pytest.fixture(scope="session")
 def is_redis_running():
     try:
-        r = redis.StrictRedis('localhost', port=6379)
+        redis_host = os.environ.get('TEST_REDIS_HOST', 'localhost')
+        redis_port = int(os.environ.get('TEST_REDIS_PORT', 6379))
+        r = redis.StrictRedis(redis_host, port=redis_port)
         r.ping()
     except redis.ConnectionError:
         return False
@@ -95,7 +97,12 @@ def create_redis(request):
             return cls(db=db, decode_responses=decode_responses, server=fake_server)
         else:
             cls = getattr(redis, name)
-            conn = cls('localhost', port=6379, db=db, decode_responses=decode_responses)
+            conn = cls(
+                       os.environ.get('TEST_REDIS_HOST', 'localhost'),
+                       port=int(os.environ.get('TEST_REDIS_PORT', 6379)),
+                       db=db,
+                       decode_responses=decode_responses
+                   )
             min_server_marker = request.node.get_closest_marker('min_server')
             if min_server_marker is not None:
                 server_version = conn.info()['redis_version']
@@ -2849,6 +2856,60 @@ def test_zremrangebylex_wrong_type(r):
     r.sadd('foo', 'bar')
     with pytest.raises(redis.ResponseError):
         r.zremrangebylex('foo', b'bar', b'baz')
+
+def test_zunion(r):
+    zadd(r, 'foo', {"one": 1})
+    zadd(r, 'foo', {"two": 2})
+    zadd(r, 'bar', {"one": 1})
+    zadd(r, 'bar', {"two": 2})
+    zadd(r, 'bar', {"three": 3})
+    zunion_result = r.zunion(['foo', 'bar'], withscores=False)
+    assert zunion_result == [b'one', b'three', b'two']
+
+def test_zunion_withscores(r):
+    zadd(r, 'foo', {"one": 1})
+    zadd(r, 'foo', {"two": 2})
+    zadd(r, 'bar', {"one": 1})
+    zadd(r, 'bar', {"two": 2})
+    zadd(r, 'bar', {"three": 3})
+    zunion_result = r.zunion('foo', 'bar', withscores=True)
+    assert zunion_result == [(b'one', 2), (b'three', 3), (b'two', 4)]
+
+def test_zunion_key_weights_dict(r):
+    zadd(r, 'foo', {"one": 1})
+    zadd(r, 'foo', {"two": 2})
+    zadd(r, 'bar', {"one": 1})
+    zadd(r, 'bar', {"two": 2})
+    zadd(r, 'bar', {"three": 3})
+    zunion_result = r.zunion({keys: ['foo', 'bar'], weights: [2.0, 1.0]})
+    assert zunion_result == [(b'one', 2), (b'three', 3), (b'two', 5)]
+
+def test_zunion_key_weights_dict_keyword_max(r):
+    zadd(r, 'foo', {"one": 1})
+    zadd(r, 'foo', {"two": 2})
+    zadd(r, 'bar', {"one": 1})
+    zadd(r, 'bar', {"two": 2})
+    zadd(r, 'bar', {"three": 3})
+    zunion_result = r.zunion({keys: ['foo', 'bar'], weights: [2.0, 1.0]}, aggregate='max', withscores=True)
+    assert zunion_result == [(b'one', 2), (b'three', 3), (b'two', 5)]
+
+def test_zunion_key_weights_ordered(r):
+    zadd(r, 'foo', {"one": 1})
+    zadd(r, 'foo', {"two": 2})
+    zadd(r, 'bar', {"one": 1})
+    zadd(r, 'bar', {"two": 2})
+    zadd(r, 'bar', {"three": 3})
+    zunion_result = r.zunion('foo', 'bar', 'weights', 2.0, 1.0, withscores=False)
+    assert zunion_result == [b'one', b'three', b'two']
+
+def test_zunion_key_weights_max_ordered(r):
+    zadd(r, 'foo', {"one": 1})
+    zadd(r, 'foo', {"two": 2})
+    zadd(r, 'bar', {"one": 1})
+    zadd(r, 'bar', {"two": 2})
+    zadd(r, 'bar', {"three": 3})
+    zunion_result = r.zunion('foo', 'bar', 'weights', 2.0, 1.0, 'AGGREGATE', 'MAX', 'WithScores', 'true')
+    assert zunion_result == [(b'one', 2), (b'three', 3), (b'two', 5)]
 
 
 def test_zunionstore(r):

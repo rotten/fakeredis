@@ -1,3 +1,4 @@
+from pprint import pformat
 import sortedcontainers
 
 
@@ -85,3 +86,6 @@ class ZSet:
 
     def items(self):
         return self._bylex.items()
+
+    def __str__(self):
+        return pformat(self._byscore)
